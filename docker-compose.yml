@@ -1,0 +1,67 @@
+services:
+  postgres:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    command: postgres -c shared_buffers=4GB -c work_mem=128MB -c effective_cache_size=8GB -c maintenance_work_mem=512MB
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-nuuru}
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "${POSTGRES_PORT:-52789}:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  frontend:
+    build:
+      context: ./nuuru.client
+      args:
+        INTERNAL_API_URL: http://backend:8080
+    restart: unless-stopped
+    ports:
+      - "${FRONTEND_PORT:-39103}:3000"
+
+  backend:
+    build:
+      context: .
+      dockerfile: Nuuru.Server/Dockerfile
+    restart: unless-stopped
+    ports:
+      - "${BACKEND_PORT:-8080}:8080"
+    environment:
+      ASPNETCORE_URLS: http://+:8080
+      ConnectionStrings__DefaultConnection: >-
+        host=postgres;port=5432;
+        username=${POSTGRES_USER:-postgres};
+        password=${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env};
+        Database=${POSTGRES_DB:-nuuru};
+        Include Error Detail=true
+      DatabaseProvider: PostgreSQL
+      Jwt__Key: ${JWT_KEY:?Set JWT_KEY in .env}
+      Jwt__Issuer: ${JWT_ISSUER:-Booru}
+      Jwt__Audience: ${JWT_AUDIENCE:-BooruAPI}
+      IpCloak__Key: ${IP_CLOAK_KEY:-c7e3a9f1d5b24680e2f8a1c4d6b93e57}
+      BBCode__QuoteSigningKey: ${BBCODE_QUOTE_SIGNING_KEY:-a5c9e7f2b8d1420693a8f5e2c1b7d4a8}
+      MediaSigning__Key: ${MEDIA_SIGNING_KEY:-b6f3a0d9c4e7f2185a6b1c3d8e2f9a40}
+      MediaSigning__DefaultTtlSeconds: ${MEDIA_SIGNING_TTL:-900}
+      FileStorage__Path: /app/uploads
+      SsrServerUrl: http://frontend:3000
+      SeedTestUsers: ${SEED_TEST_USERS:-false}
+      HCaptcha__SiteKey: ${HCAPTCHA_SITE_KEY:-}
+      HCaptcha__SecretKey: ${HCAPTCHA_SECRET_KEY:-}
+    volumes:
+      - uploads_data:/app/uploads
+    depends_on:
+      postgres:
+        condition: service_healthy
+      frontend:
+        condition: service_started
+
+volumes:
+  postgres_data:
+  uploads_data:
